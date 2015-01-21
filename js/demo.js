@@ -38,21 +38,31 @@ app.controller('SearchController', function($scope, $rootScope, $sce, $http) {
   // Set up the hash
   var hash = new L.Hash(map);
   var marker;
+  var markers = [];
+  var remove_markers = function(){
+
+    for (i=0; i<markers.length; i++) {
+      map.removeLayer(markers[i]);
+    }
+    markers = [];
+  };
 
   $rootScope.$on( 'map.setView', function( ev, geo, zoom ){
     map.setView( geo, zoom || 8 );
   });
 
   $rootScope.$on( 'map.dropMarker', function( ev, geo, text, icon_name ){
-    marker = new L.marker(geo, {icon: L.AwesomeMarkers.icon(
-      {icon: icon_name,  prefix: 'glyphicon', markerColor: 'green'}) }).bindPopup(text);
+    marker = new L.marker(geo).bindPopup(text);
     map.addLayer(marker);
+    markers.push(marker);
     marker.openPopup();
   });
 
   $rootScope.$on( 'map.dropGeoJson', function( ev, data ){
+    remove_markers();
     var geoJsonLayer = L.geoJson(data, {
       onEachFeature: function (feature, layer) {
+        markers.push(layer);
         layer.bindPopup(feature.properties.text);
       }
     }).addTo(map);
@@ -60,9 +70,7 @@ app.controller('SearchController', function($scope, $rootScope, $sce, $http) {
   });
 
   $rootScope.$on( 'map.removeAllMarkers', function( ev, geo, text ){
-    if (marker) {
-      map.removeLayer(marker);
-    }
+    remove_markers();
   });
 
   $rootScope.$on( 'fullTextSearch', function( ev, text ){
@@ -133,13 +141,19 @@ app.controller('SearchController', function($scope, $rootScope, $sce, $http) {
       if (data) {
         var geo = data.features[0].geometry.coordinates;
         var txt = data.features[0].properties.text;
-        $rootScope.$emit( 'map.setView', geo.reverse(), $rootScope.geobase.zoom );
-        $rootScope.$emit( 'map.dropMarker', geo, txt, 'star');
+        $rootScope.$emit( 'map.dropMarker', geo.reverse(), txt, 'star');
       } else { }
     })
   };
 
   var getResults = function(url, resultkey) {
+    var bounds = map.getBounds();
+    var bbox = [];
+    bbox.push(bounds._northEast.lat);
+    bbox.push(bounds._northEast.lng);
+    bbox.push(bounds._southWest.lat);
+    bbox.push(bounds._southWest.lng);
+
     $http({
       url: $scope.api_url+url,
       method: 'GET',
@@ -149,6 +163,7 @@ app.controller('SearchController', function($scope, $rootScope, $sce, $http) {
         lat: $rootScope.geobase ? $rootScope.geobase.lat : 0,
         lon: $rootScope.geobase ? $rootScope.geobase.lon : 0,
         zoom:$rootScope.geobase ? $rootScope.geobase.zoom : 12,
+        bbox:bbox.length === 4  ? bbox.join(',') : '',
         size: 10
       },
       headers: { 'Accept': 'application/json' }
@@ -176,7 +191,14 @@ app.controller('SearchController', function($scope, $rootScope, $sce, $http) {
   $scope.search = '';
   $scope.searchresults = [];
   $scope.suggestresults = [];
-  $scope.api_url = 'https://pelias.mapzen.com';
+  $scope.coarse = 'FINE';
+  $scope.api_url = '//pelias.mapzen.com';
+
+  $scope.switchType = function(coarse) {
+    $scope.coarse = coarse === 'FINE' ? 'COARSE' : 'FINE';
+    $scope.suggest();
+    $scope.fullTextSearch();
+  };
 
   $scope.selectResult = function( result, changeQuery ){
     resultSelected(result.properties.text, result.geometry.coordinates, changeQuery)
@@ -220,7 +242,8 @@ app.controller('SearchController', function($scope, $rootScope, $sce, $http) {
       return;
     }
 
-    getResults('/suggest', 'suggestresults');
+    var url = $scope.coarse === 'FINE' ? '/suggest' : '/suggest/coarse';
+    getResults(url, 'suggestresults');
   }
 
   $scope.fullTextSearch = function(){
@@ -230,7 +253,9 @@ app.controller('SearchController', function($scope, $rootScope, $sce, $http) {
       return;
     }
     $rootScope.$emit('fullTextSearch', $scope.search);
-    getResults('/search', 'searchresults');
+
+    var url = $scope.coarse === 'FINE' ? '/search' : '/search/coarse';
+    getResults(url, 'searchresults');
   }
 
   $scope.$watch( 'search', function( input ){
